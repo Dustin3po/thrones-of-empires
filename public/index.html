@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THRONES OF EMPIRES</title>
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- Autenticacion -->
+<section id="screen-login" class="screen active">
+  <div class="title"><h1>THRONES<br><span>OF EMPIRES</span></h1></div>
+  <div class="panel parchment auth">
+    <div class="tabs"><button class="tab active" data-tab="login">Entrar</button><button class="tab" data-tab="register">Registrarse</button></div>
+    <label>Usuario<input id="auth-user" maxlength="16" autocomplete="username"></label>
+    <label>Contraseña<input id="auth-pass" type="password" maxlength="72" autocomplete="current-password"></label>
+    <div id="auth-error" class="error"></div>
+    <button id="auth-submit" class="btn gold">Entrar</button>
+    <button id="auth-guest" class="btn">Jugar como invitado</button>
+  </div>
+</section>
+
+<!-- Menu principal -->
+<section id="screen-menu" class="screen">
+  <div class="title small"><h1>THRONES <span>OF EMPIRES</span></h1></div>
+  <div class="menu-grid">
+    <div class="panel parchment">
+      <h2>Escaramuza (offline)</h2>
+      <label>Civilización<select id="sk-civ"></select></label>
+      <label>Semilla del mundo<div class="row"><input id="sk-seed" inputmode="numeric"><button id="sk-rand" class="btn mini">🎲</button></div></label>
+      <button id="btn-skirmish" class="btn gold">Comenzar partida</button>
+      <button id="btn-multi" class="btn">Multijugador online</button>
+    </div>
+    <div class="panel parchment">
+      <h2>Perfil</h2>
+      <div id="profile"></div>
+      <button id="btn-logout" class="btn">Cerrar sesión</button>
+    </div>
+  </div>
+  <p class="net-status" id="net-status"></p>
+</section>
+
+<!-- Lobby -->
+<section id="screen-lobby" class="screen">
+  <div class="title small"><h1>SALAS <span>MULTIJUGADOR</span></h1></div>
+  <div class="menu-grid">
+    <div class="panel parchment">
+      <h2>Salas abiertas</h2>
+      <ul id="room-list" class="list"></ul>
+      <button id="room-create" class="btn gold">Crear sala</button>
+    </div>
+    <div class="panel parchment">
+      <h2 id="room-title">Sin sala</h2>
+      <ul id="room-players" class="list"></ul>
+      <button id="room-start" class="btn gold" disabled>Iniciar partida</button>
+      <button id="room-leave" class="btn">Salir de la sala</button>
+    </div>
+  </div>
+  <button id="lobby-back" class="btn back">← Volver</button>
+</section>
+
+<!-- Carga -->
+<section id="screen-loading" class="screen">
+  <div class="title small"><h1>THRONES <span>OF EMPIRES</span></h1></div>
+  <div class="loading-box"><div id="load-text">Cargando…</div><div class="bar"><i id="load-bar"></i></div><p id="load-tip"></p></div>
+</section>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div class="player"><b id="hud-name">-</b><div class="lvl"><i id="hud-xp"></i></div><small id="hud-level"></small></div>
+    <div class="res" title="Alimento"><span class="ico food"></span><b id="r-food">0</b></div>
+    <div class="res" title="Madera"><span class="ico wood"></span><b id="r-wood">0</b></div>
+    <div class="res" title="Oro"><span class="ico gold"></span><b id="r-gold">0</b></div>
+    <div class="res" title="Piedra"><span class="ico stone"></span><b id="r-stone">0</b></div>
+    <div class="res" title="Influencia"><span class="ico infl"></span><b id="r-infl">0</b></div>
+    <div class="age">Edad Alta</div>
+    <div class="clan" id="hud-clan">Sin clan</div>
+  </div>
+  <div id="minimap-wrap"><canvas id="minimap"></canvas><div class="mm-label">Mapa táctico</div></div>
+  <div id="coords"></div>
+  <div id="actionbar">
+    <button class="round" data-act="base" title="Centrar en la base (H)">🏰</button>
+    <button class="round" data-act="rotl" title="Rotar izquierda (Q)">⟲</button>
+    <button class="round" data-act="rotr" title="Rotar derecha (E)">⟳</button>
+    <button class="round" data-act="zin" title="Acercar">＋</button>
+    <button class="round" data-act="zout" title="Alejar">－</button>
+    <button class="round" data-act="chat" title="Chat (Enter)">💬</button>
+    <button class="round" data-act="menu" title="Menú (Esc)">☰</button>
+  </div>
+  <div id="chat">
+    <div class="chat-tabs"><button data-ch="global" class="active">Global</button><button data-ch="sala">Sala</button><button data-ch="sistema">Sistema</button></div>
+    <div id="chat-log"></div>
+    <input id="chat-input" maxlength="200" placeholder="Pulsa Enter para escribir…">
+  </div>
+</div>
+
+<div id="pause" class="screen overlay">
+  <div class="panel parchment"><h2>Pausa</h2>
+    <button id="pause-resume" class="btn gold">Continuar</button>
+    <button id="pause-exit" class="btn">Salir al menú</button></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
