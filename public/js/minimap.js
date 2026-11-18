@@ -12,6 +12,7 @@ export class Minimap {
     this.dim = document.createElement('canvas'); this.dim.width = this.dim.height = size;
     this.sources = new Map();
     this.markers = [];
+    this.heights = new Float32Array(size * size);
     this.onPick = null;
     this.ray = new THREE.Raycaster(); this.plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const f = this.fog.getContext('2d'); f.fillStyle = '#05080c'; f.fillRect(0, 0, size, size);
@@ -27,6 +28,7 @@ export class Minimap {
       for (let px = 0; px < S; px++) {
         const [x, z] = this.toWorld(px + 0.5, py + 0.5);
         const h = T.heightAt(x, z);
+        this.heights[py * S + px] = h;
         const shade = 1 + Math.max(-0.35, Math.min(0.35, (T.heightAt(x - d, z - d) - T.heightAt(x + d, z + d)) * 0.06));
         let c;
         if (h < 0) { const t = Math.max(0, 1 + h / 14); c = [0.1 + 0.1 * t, 0.3 + 0.2 * t, 0.5 + 0.18 * t]; }

@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { Terrain, ChunkManager, HALF } from './terrain.js';
+import { Terrain, ChunkManager } from './terrain.js';
+import { Water } from './water.js';
+import { Atmosphere } from './atmosphere.js';
+import { PostFX } from './postfx.js';
 import { RTSCamera } from './camera.js';
 import { Minimap } from './minimap.js';
 import { Net, api } from './net.js';
@@ -132,64 +135,79 @@ $('#chat-input').addEventListener('keydown', (e) => {
 /* ---------- Juego ---------- */
 const canvas = $('#game');
 let renderer = null;
+const QUALITY = {
+  low:  { pr: () => 1, shadow: 1024, post: false, bloom: false },
+  med:  { pr: () => Math.min(devicePixelRatio, 1.5), shadow: 2048, post: true, bloom: true },
+  high: { pr: () => Math.min(devicePixelRatio, 2), shadow: 4096, post: true, bloom: true }
+};
+try { state.quality = localStorage.getItem('toe_quality'); } catch (_) { /* ignorar */ }
+if (!QUALITY[state.quality]) state.quality = 'med';
+$('#quality').value = state.quality;
+$('#quality').onchange = (e) => applyQuality(e.target.value);
+
+function applyQuality(level) {
+  state.quality = level;
+  try { localStorage.setItem('toe_quality', level); } catch (_) { /* ignorar */ }
+  const q = QUALITY[level];
+  if (renderer) { renderer.setPixelRatio(q.pr()); renderer.setSize(innerWidth, innerHeight, false); }
+  const g = state.game; if (!g) return;
+  g.sun.shadow.mapSize.set(q.shadow, q.shadow);
+  if (g.sun.shadow.map) { g.sun.shadow.map.dispose(); g.sun.shadow.map = null; }
+  g.post.configure(q.post, q.bloom);
+  g.post.setSize(innerWidth, innerHeight);
+}
+
 function ensureRenderer() {
   if (renderer) return renderer;
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(QUALITY[state.quality].pr());
+  renderer.setSize(innerWidth, innerHeight, false);   // corrige el lienzo borroso del Modulo 1
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   return renderer;
 }
 const setProgress = (p, t) => { $('#load-bar').style.width = Math.round(p * 100) + '%'; if (t) $('#load-text').textContent = t; };
 const tick = () => new Promise(r => setTimeout(r));
 
-function skyTexture() {
-  const c = document.createElement('canvas'); c.width = 2; c.height = 256;
-  const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 256);
-  gr.addColorStop(0, '#2f6fb5'); gr.addColorStop(0.55, '#8fc0e6'); gr.addColorStop(1, '#e8efe0');
-  g.fillStyle = gr; g.fillRect(0, 0, 2, 256);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-}
-
 async function startGame({ seed, mode, civ }) {
   if (state.game) stopGame();
   show('loading'); $('#load-tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   setProgress(0, 'Generando el mundo…'); await tick();
   const r = ensureRenderer();
-  const scene = new THREE.Scene();
-  scene.background = skyTexture();                       // sin niebla en el mundo 3D
+  const scene = new THREE.Scene();                       // sin niebla en el mundo 3D
   const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 1, 2600);
   const terrain = new Terrain(seed >>> 0);
   const spawn = terrain.findSpawn(0);
 
-  scene.add(new THREE.HemisphereLight(0xbcd8ff, 0x5a4a32, 0.9));
-  const sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
-  sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -130, right: 130, top: 130, bottom: -130, near: 1, far: 500 });
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+  const sun = new THREE.DirectionalLight(0xffffff, 3);
+  sun.castShadow = true;
+  Object.assign(sun.shadow.camera, { left: -130, right: 130, top: 130, bottom: -130, near: 1, far: 600 });
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.6;
-  scene.add(sun, sun.target);
+  scene.add(hemi, sun, sun.target);
+  const atmo = new Atmosphere(scene, sun, hemi, r);
 
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(5000, 5000),
-    new THREE.MeshPhysicalMaterial({ color: 0x2e7ea6, transparent: true, opacity: 0.82, roughness: 0.08, metalness: 0, clearcoat: 1 }));
-  water.rotation.x = -Math.PI / 2; water.receiveShadow = true; scene.add(water);
-
+  setProgress(0.02, 'Forjando texturas procedurales…'); await tick();
   const chunks = new ChunkManager(scene, terrain);
   const rig = new RTSCamera(camera, canvas, terrain);
   rig.focus(spawn.x, spawn.z); rig.target.y = terrain.heightAt(spawn.x, spawn.z);
 
   const mm = new Minimap($('#minimap'), terrain, 384);
-  await mm.buildTerrain((p) => setProgress(p * 0.5, 'Cartografiando el mapa táctico…'));
+  await mm.buildTerrain((p) => setProgress(0.05 + p * 0.4, 'Cartografiando el mapa táctico…'));
   mm.addSource('base', spawn.x, spawn.z, 130);
   mm.addSource('cam', spawn.x, spawn.z, 60);
   mm.setMarker('base', spawn.x, spawn.z, '#f7d24a');
   mm.onPick = (x, z) => rig.focus(x, z);
 
+  const water = new Water(scene, mm.heights, mm.S, atmo);
+  const post = new PostFX(r, scene, camera);
+
   // Pre-construir los chunks cercanos con barra de progreso
   let guard = 0;
   while (guard++ < 400) {
     const pending = chunks.update(spawn.x, spawn.z, 4);
-    setProgress(0.5 + 0.5 * Math.max(0, 1 - pending / 220), 'Levantando el terreno…');
+    setProgress(0.45 + 0.55 * Math.max(0, 1 - pending / 220), 'Levantando el terreno…');
     await tick();
     if (!pending) break;
   }
@@ -202,40 +220,45 @@ async function startGame({ seed, mode, civ }) {
   $('#hud-xp').style.width = u ? Math.min(100, (u.wins * 10) % 100) + '%' : '0%';
   for (const k of Object.keys(res)) $('#r-' + k).textContent = res[k];
 
-  const g = state.game = { scene, camera, terrain, chunks, rig, mm, sun, water, spawn, paused: false, raf: 0, last: performance.now(), fps: 0, acc: 0, frames: 0, mode, civ };
+  const g = state.game = { scene, camera, terrain, chunks, rig, mm, sun, hemi, atmo, water, post, spawn, paused: false, raf: 0,
+    last: performance.now(), time: 0, fps: 0, acc: 0, frames: 0, mode, civ };
+  applyQuality(state.quality);
   show(null); renderChat();
-  addChat('sistema', 'Sistema', `Partida ${mode === 'online' ? 'online' : 'de escaramuza'} iniciada. Semilla: ${seed}.`);
+  addChat('sistema', 'Sistema', `Partida ${mode === 'online' ? 'online' : 'de escaramuza'} iniciada. Semilla: ${seed}. T: ciclo día/noche · N: cambiar hora.`);
   const loop = (now) => {
     g.raf = requestAnimationFrame(loop);
     const dt = Math.min(0.1, (now - g.last) / 1000); g.last = now;
     if (!g.paused) {
+      g.time += dt;
       rig.enabled = document.activeElement !== $('#chat-input');
       rig.update(dt);
       const t = rig.target;
       chunks.update(t.x, t.z, 2);
-      water.position.set(t.x, -0.15, t.z);
-      sun.position.set(t.x + 120, t.y + 180, t.z + 80); sun.target.position.copy(t); sun.target.updateMatrixWorld();
+      atmo.update(dt, t, camera);
+      water.update(t.x, t.z, g.time, atmo);
+      chunks.uniforms.uTime.value = g.time; chunks.uniforms.uSunI.value = atmo.day;
       mm.updateSource('cam', t.x, t.z);
     }
-    r.render(scene, camera);
+    post.render(dt);
     mm.draw(camera);
     g.acc += dt; g.frames++;
     if (g.acc > 0.5) { g.fps = Math.round(g.frames / g.acc); g.acc = 0; g.frames = 0; }
-    $('#coords').textContent = `X ${Math.round(rig.target.x)}  Z ${Math.round(rig.target.z)}  ·  ${g.fps} FPS  ·  ${chunks.chunks.size} chunks`;
+    $('#coords').textContent = `X ${Math.round(rig.target.x)}  Z ${Math.round(rig.target.z)}  ·  ${atmo.label()}  ·  ${g.fps} FPS  ·  ${chunks.chunks.size} chunks`;
   };
   g.raf = requestAnimationFrame(loop);
 }
 
 function stopGame() {
   const g = state.game; if (!g) return;
-  cancelAnimationFrame(g.raf); g.chunks.dispose(); g.rig.dispose();
-  g.scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o !== g.chunks.group) o.material.dispose && o.material.dispose(); });
+  cancelAnimationFrame(g.raf);
+  g.post.dispose(); g.water.dispose(); g.atmo.dispose(); g.chunks.dispose(); g.rig.dispose();
   state.game = null;
 }
 addEventListener('resize', () => {
   if (!renderer) return;
   renderer.setSize(innerWidth, innerHeight, false);
-  if (state.game) { state.game.camera.aspect = innerWidth / innerHeight; state.game.camera.updateProjectionMatrix(); }
+  const g = state.game;
+  if (g) { g.camera.aspect = innerWidth / innerHeight; g.camera.updateProjectionMatrix(); g.post.setSize(innerWidth, innerHeight); }
 });
 
 $('#btn-skirmish').onclick = () => {
@@ -265,6 +288,11 @@ addEventListener('keydown', (e) => {
   if (!state.game) return;
   if (e.key === 'Enter' && document.activeElement !== $('#chat-input')) { e.preventDefault(); $('#chat-input').focus(); }
   else if (e.key === 'Escape' && document.activeElement !== $('#chat-input')) togglePause();
+  else if (document.activeElement !== $('#chat-input') && !state.game.paused) {
+    const a = state.game.atmo, k = e.key.toLowerCase();
+    if (k === 't') { a.auto = !a.auto; addChat('sistema', 'Sistema', a.auto ? 'Ciclo día/noche activado' : 'Ciclo día/noche detenido'); }
+    if (k === 'n') { a.time = (a.time + 0.125) % 1; addChat('sistema', 'Sistema', 'Hora: ' + a.label()); }
+  }
 });
 
 /* ---------- Arranque: restaurar sesion si existe ---------- */

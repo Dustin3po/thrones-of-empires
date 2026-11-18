@@ -12,4 +12,4 @@ Sin servidor (abriendo `public/` con un servidor estático) funciona el modo Esc
 ## Controles
 WASD / flechas / bordes: mover · Q/E o botón central: rotar · Rueda: zoom con inercia
 H: centrar en la base · Ctrl+1..9: guardar cámara · 1..9: ir (doble toque: vista completa)
-Enter: chat · Esc: pausa · Clic/arrastre en el minimapa: desplazar cámara
+T: ciclo día/noche · N: cambiar hora · Enter: chat · Esc: pausa (calidad gráfica Baja/Media/Alta) · Clic/arrastre en el minimapa: desplazar cámara

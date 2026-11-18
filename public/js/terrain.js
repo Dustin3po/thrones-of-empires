@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeNoise } from './noise.js';
+import { createTerrainMaterial } from './terrainMaterial.js';
 
 export const CHUNK = 64;            // unidades por chunk
 export const WORLD_CHUNKS = 24;     // 24x24 chunks = 1536 x 1536 unidades
@@ -30,7 +31,7 @@ export class Terrain {
     return h + (-14 - h) * edge;
   }
 
-  /* Color por bioma: lecho, arena, pasto, estepa seca, roca y nieve */
+  /* Color plano por bioma (lo usa el minimapa) */
   colorAt(h, slope, x, z) {
     const v = this.n2.noise2(x * 0.08, z * 0.08) * 0.5 + 0.5;
     const v2 = this.n3.noise2(x * 0.4, z * 0.4) * 0.5 + 0.5;
@@ -38,9 +39,29 @@ export class Terrain {
     mix(c, 0.78, 0.70, 0.5, smooth(-2.5, -0.5, h));
     mix(c, 0.2 + 0.12 * v, 0.4 + 0.14 * v2, 0.13, smooth(0.8, 2.4, h));
     mix(c, 0.52, 0.47 + 0.05 * v, 0.26, smooth(9, 19, h + v * 5) * 0.8);
-    const rock = Math.max(smooth(0.3, 0.55, slope), smooth(30, 40, h + v * 4));
+    const rock = Math.max(smooth(0.3, 0.55, slope), smooth(32, 42, h + v * 4));
     mix(c, 0.4 + 0.1 * v, 0.38 + 0.08 * v, 0.36 + 0.06 * v2, rock);
-    mix(c, 0.95, 0.96, 0.98, smooth(46, 54, h + v * 5) * (1 - smooth(0.6, 0.9, slope) * 0.5));
+    mix(c, 0.95, 0.96, 0.98, smooth(52, 62, h + v * 5) * (1 - smooth(0.6, 0.9, slope) * 0.5));
+    return c;
+  }
+
+  /* Pesos de mezcla [cesped, arena, roca, nieve] para el shader de terreno */
+  splatAt(h, slope, x, z) {
+    const v = this.n2.noise2(x * 0.08, z * 0.08) * 0.5 + 0.5;
+    const land = smooth(0.8, 2.4, h);
+    const rock = Math.max(smooth(0.32, 0.58, slope), smooth(32, 42, h + v * 4));
+    const snow = smooth(52, 62, h + v * 5) * (1 - smooth(0.6, 0.9, slope) * 0.5);
+    const k = (1 - rock) * (1 - snow);
+    return [land * k, (1 - land) * k, rock * (1 - snow), snow];
+  }
+
+  /* Tinte macro (verde frondoso -> estepa seca, lecho submarino azulado) */
+  tintAt(h, x, z) {
+    const v = this.n2.noise2(x * 0.08, z * 0.08) * 0.5 + 0.5;
+    const m = 0.88 + 0.24 * v;
+    const c = [m, m, m];
+    mix(c, 1.28, 1.05, 0.62, smooth(9, 19, h + v * 5) * 0.8 * smooth(0.8, 2.4, h));
+    mix(c, 0.4, 0.62, 0.72, smooth(0.3, -3.5, h));
     return c;
   }
 
@@ -65,11 +86,13 @@ export class ChunkManager {
     this.scene = scene;
     this.terrain = terrain;
     this.chunks = new Map();
-    this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+    this.material = createTerrainMaterial();
     this.group = new THREE.Group();
     scene.add(this.group);
     this.limit = WORLD_CHUNKS / 2;
   }
+
+  get uniforms() { return this.material.userData.uniforms; }
 
   lodFor(dist) { return dist < 2.5 ? 32 : dist < 5 ? 16 : 8; }
 
@@ -81,15 +104,20 @@ export class ChunkManager {
     const at = (i, j) => H[(j + 1) * W + i + 1];
 
     const side = res + 1, N = side * side, nv = N + 4 * side;
-    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), spl = new Float32Array(nv * 4);
     const idx = [];
     for (let j = 0; j <= res; j++) {
       for (let i = 0; i <= res; i++) {
         const k = j * side + i, x = ox + i * step, z = oz + j * step, y = at(i, j);
         let nx = at(i - 1, j) - at(i + 1, j), ny = 2 * step, nz = at(i, j - 1) - at(i, j + 1);
         const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
+        // Oclusion ambiental horneada por curvatura (independiente del LOD)
+        const avgN = (at(i - 1, j) + at(i + 1, j) + at(i, j - 1) + at(i, j + 1)) * 0.25;
+        const ao = Math.min(1.1, Math.max(0.7, 1 - ((avgN - y) / (step * step)) * 8 * 0.5));
+        const tint = T.tintAt(y, x, z);
         pos.set([x, y, z], k * 3); nor.set([nx, ny, nz], k * 3);
-        col.set(T.colorAt(y, 1 - ny, x, z), k * 3);
+        col.set([tint[0] * ao, tint[1] * ao, tint[2] * ao], k * 3);
+        spl.set(T.splatAt(y, 1 - ny, x, z), k * 4);
         if (i < res && j < res) idx.push(k, k + side, k + 1, k + 1, k + side, k + side + 1);
       }
     }
@@ -104,6 +132,7 @@ export class ChunkManager {
         pos.set([pos[o], pos[o + 1] - 6, pos[o + 2]], s * 3);
         nor.set([nor[o], nor[o + 1], nor[o + 2]], s * 3);
         col.set([col[o], col[o + 1], col[o + 2]], s * 3);
+        spl.set([spl[e[k] * 4], spl[e[k] * 4 + 1], spl[e[k] * 4 + 2], spl[e[k] * 4 + 3]], s * 4);
         if (k < e.length - 1) idx.push(e[k], e[k + 1], base + k + 1, e[k], base + k + 1, base + k);
       }
     }
@@ -111,6 +140,7 @@ export class ChunkManager {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('splat', new THREE.BufferAttribute(spl, 4));
     g.setIndex(idx);
     g.computeBoundingSphere();
     return g;
@@ -159,6 +189,7 @@ export class ChunkManager {
     for (const ch of this.chunks.values()) { this.group.remove(ch.mesh); ch.mesh.geometry.dispose(); }
     this.chunks.clear();
     this.scene.remove(this.group);
+    this.material.userData.disposeTextures();
     this.material.dispose();
   }
 }
